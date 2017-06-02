@@ -3,6 +3,9 @@
 // A0 CORRENTE
 // A1 TENSIONE
 
+// numero di periodi controllabile
+#define NP 1
+
 // supponiamo l'array di appoggio con una dimensione sufficiente 
 // per memorizzare i valori delle letture su almeno due periodi
 #define DIMENSIONE_MAX 100
@@ -35,6 +38,9 @@ double appoggioSuccessivoTensione = 0;
 double appoggioPrecedenteCorrente = 0;
 double appoggioSuccessivoCorrente = 0;
 
+int contatorePeriodi = 0;
+double appoggioPotenzaAttiva = 0;
+
 double numerico2tensione(int num) {
   return VFS*num/NMAX;
 }
@@ -65,14 +71,14 @@ void getVI() {
       nEventiDiTrigger++;
     }
 
-	// se non si sono ancora verificati eventi di trigger non fare nulla
+    // se non si sono ancora verificati eventi di trigger non fare nulla
     if (nEventiDiTrigger == 0) 
       return;
 
-	// Se il numero di eventi di trigger è pari (e diverso da zero, per la condizione precedente), 
-	// significa che abbiamo completato il riempimento della prima metà del buffer.
-	// Se invece esso diventa dispari (ma non 1), abbiamo completato il 
-	// riempimento della seconda metà del buffer.
+    // Se il numero di eventi di trigger è pari (e diverso da zero, per la condizione precedente), 
+    // significa che abbiamo completato il riempimento della prima metà del buffer.
+    // Se invece esso diventa dispari (ma non 1), abbiamo completato il 
+    // riempimento della seconda metà del buffer.
     if (eventoDiTrigger) {
       if (nEventiDiTrigger % 2 == 0)
         HALF_BUFFER = true;
@@ -148,29 +154,55 @@ double potenza_attiva(bool isPrimaMeta, int n) {
 
 void loop() {
   if (HALF_BUFFER) {
-	double veff = v_rms(true, primoIndice);
-	double ieff = i_rms(true, primoIndice);
-	double potapp = veff*ieff;
-	double potatt = potenza_attiva(true, primoIndice);
-	double cosphi = potatt/potapp;
-	
-	char buffer[300];
-	snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
+    double veff = v_rms(true, primoIndice);
+    double ieff = i_rms(true, primoIndice);
+    double potapp = veff*ieff;
+    double potatt = potenza_attiva(true, primoIndice);
+    appoggioPotenzaAttiva += potatt;
+    double cosphi = potatt/potapp;
+    
+    char buffer[300];
+    snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
+    Serial.print(buffer);
 
+    contatorePeriodi++;
+    if (contatorePeriodi == NP) {
+      double potenzaMedia = appoggioPotenzaAttiva / NP;
+      char tmp[100];
+      snprintf(tmp, 100, "La potenza media su %d periodi è %f V\n\n", NP, potenzaMedia);
+      Serial.print(tmp);
+
+      appoggioPotenzaAttiva = 0;
+      contatorePeriodi = 0;
+    }
+    
     primoIndice = 0;
     HALF_BUFFER = false;
   }
 
   else if (FULL_BUFFER) {
-	double veff = v_rms(false, secondoIndice);
-	double ieff = i_rms(false, secondoIndice);
-	double potapp = veff*ieff;
-	double potatt = potenza_attiva(false, secondoIndice);
-	double cosphi = potatt/potapp;
-	
-	char buffer[300];
-	snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
-	
+    double veff = v_rms(false, secondoIndice);
+    double ieff = i_rms(false, secondoIndice);
+    double potapp = veff*ieff;
+    double potatt = potenza_attiva(false, secondoIndice);
+    appoggioPotenzaAttiva += potatt;
+    double cosphi = potatt/potapp;
+    
+    char buffer[300];
+    snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
+    Serial.print(buffer);
+
+    contatorePeriodi++;
+    if (contatorePeriodi == NP) {
+      double potenzaMedia = appoggioPotenzaAttiva / NP;
+      char tmp[100];
+      snprintf(tmp, 100, "La potenza media su %d periodi è %f V\n\n", NP, potenzaMedia);
+      Serial.print(tmp);
+
+      appoggioPotenzaAttiva = 0;
+      contatorePeriodi = 0;
+    }
+    
     secondoIndice = 0;
     FULL_BUFFER = false;
   }
