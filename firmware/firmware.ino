@@ -4,7 +4,9 @@
 // A1 TENSIONE
 
 // numero di periodi controllabile
-#define NP 1
+#define NP 50
+
+#define FC 2000
 
 // supponiamo l'array di appoggio con una dimensione sufficiente 
 // per memorizzare i valori delle letture su almeno due periodi
@@ -39,7 +41,12 @@ double appoggioPrecedenteCorrente = 0;
 double appoggioSuccessivoCorrente = 0;
 
 int contatorePeriodi = 0;
+double appoggioFrequenza = 0;
 double appoggioPotenzaAttiva = 0;
+double appoggioTensioneRMS = 0;
+double appoggioCorrenteRMS = 0;
+double appoggioPotenzaApparente = 0;
+double appoggioFattorePotenza = 0;
 
 double numerico2tensione(int num) {
   return VFS*num/NMAX;
@@ -115,7 +122,7 @@ void setup() {
 double v_rms(bool isPrimaMeta, int n) {
   double tmp_rms = 0;
 
-  for (int offset = isPrimaMeta ? 0 : 50, i = offset; i < n + offset; i++) {
+  for (int offset = isPrimaMeta ? 0 : DIMENSIONE_MAX/2, i = offset; i < n + offset; i++) {
     double valore = (numerico2tensione(memoria_tensione[i]) - K2_TENSIONE*VFS)/K1_TENSIONE; 
     tmp_rms += valore*valore;
   }
@@ -129,7 +136,7 @@ double v_rms(bool isPrimaMeta, int n) {
 double i_rms(bool isPrimaMeta, int n) {
   double tmp_rms = 0;
 
-  for (int offset = isPrimaMeta ? 0 : 50, i = offset; i < n + offset; i++) {
+  for (int offset = isPrimaMeta ? 0 : DIMENSIONE_MAX/2, i = offset; i < n + offset; i++) {
     double valore = (numerico2tensione(memoria_corrente[i]) - K2_CORRENTE*VFS)/K1_CORRENTE; 
     tmp_rms += valore*valore;
   }
@@ -143,13 +150,43 @@ double i_rms(bool isPrimaMeta, int n) {
 double potenza_attiva(bool isPrimaMeta, int n) {
 	double tmp_pot = 0;
 	
-	for (int offset = isPrimaMeta ? 0 : 50, i = offset; i < n + offset; i++) {
-		double ik = (numerico2tensione(memoria_corrente[i]) - K2_CORRENTE*VFS)/K1_CORRENTE;
-		double vk = (numerico2tensione(memoria_tensione[i]) - K2_TENSIONE*VFS)/K1_TENSIONE; 
+	for (int offset = isPrimaMeta ? 0 : DIMENSIONE_MAX/2, i = offset; i < n + offset; i++) {
+		double ik = (numerico2tensione(memoria_corrente[i]) - K2_CORRENTE*VFS)/K1_CORRENTE * 2;
+		double vk = (numerico2tensione(memoria_tensione[i]) - K2_TENSIONE*VFS)/K1_TENSIONE * 100; 
 		tmp_pot += vk*ik;
 	}
 	
 	return tmp_pot / n;
+}
+
+void stampa() {
+  if (contatorePeriodi == NP) {
+    Serial.print("\n\n\n\nTensione RMS: ");
+    Serial.print(appoggioTensioneRMS / NP);
+    Serial.println(" V");
+    Serial.print("Corrente RMS: ");
+    Serial.print(appoggioCorrenteRMS / NP);
+    Serial.println(" A");
+    Serial.print("Potenza apparente: ");
+    Serial.print(appoggioPotenzaApparente / NP);
+    Serial.println(" VA");
+    Serial.print("Potenza attiva: ");
+    Serial.print(appoggioPotenzaAttiva / NP);
+    Serial.println(" W");
+    Serial.print("Fattore di potenza: ");
+    Serial.println(appoggioFattorePotenza / NP);
+    Serial.print("Frequenza: ");
+    Serial.print(appoggioFrequenza / NP);
+    Serial.println(" Hz");
+  
+    appoggioPotenzaAttiva = 0;
+    appoggioPotenzaApparente = 0;
+    appoggioFattorePotenza = 0;
+    appoggioTensioneRMS = 0;   
+    appoggioCorrenteRMS = 0;
+    appoggioFrequenza = 0; 
+    contatorePeriodi = 0;
+  }  
 }
 
 void loop() {
@@ -158,24 +195,17 @@ void loop() {
     double ieff = i_rms(true, primoIndice);
     double potapp = veff*ieff;
     double potatt = potenza_attiva(true, primoIndice);
+
+    appoggioCorrenteRMS += ieff;
+    appoggioTensioneRMS += veff;
     appoggioPotenzaAttiva += potatt;
-    double cosphi = potatt/potapp;
-    
-    char buffer[300];
-    snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
-    Serial.print(buffer);
+    appoggioPotenzaApparente += potapp;
+    appoggioFattorePotenza += potatt/potapp;
+    appoggioFrequenza += FC / primoIndice;
 
     contatorePeriodi++;
-    if (contatorePeriodi == NP) {
-      double potenzaMedia = appoggioPotenzaAttiva / NP;
-      char tmp[100];
-      snprintf(tmp, 100, "La potenza media su %d periodi è %f V\n\n", NP, potenzaMedia);
-      Serial.print(tmp);
+    stampa();
 
-      appoggioPotenzaAttiva = 0;
-      contatorePeriodi = 0;
-    }
-    
     primoIndice = 0;
     HALF_BUFFER = false;
   }
@@ -185,24 +215,17 @@ void loop() {
     double ieff = i_rms(false, secondoIndice);
     double potapp = veff*ieff;
     double potatt = potenza_attiva(false, secondoIndice);
+
+    appoggioCorrenteRMS += ieff;
+    appoggioTensioneRMS += veff;
     appoggioPotenzaAttiva += potatt;
-    double cosphi = potatt/potapp;
-    
-    char buffer[300];
-    snprintf(buffer, 300, "Tensione RMS: %f V\nCorrente RMS: %f A\nPotenza attiva: %f W\nPotenza apparente: %f VA\nFattore di potenza: %f\n\n\n", veff, ieff, potatt, potapp, cosphi);
-    Serial.print(buffer);
+    appoggioPotenzaApparente += potapp;
+    appoggioFattorePotenza += potatt/potapp;
+    appoggioFrequenza += FC / secondoIndice;
 
     contatorePeriodi++;
-    if (contatorePeriodi == NP) {
-      double potenzaMedia = appoggioPotenzaAttiva / NP;
-      char tmp[100];
-      snprintf(tmp, 100, "La potenza media su %d periodi è %f V\n\n", NP, potenzaMedia);
-      Serial.print(tmp);
+    stampa();
 
-      appoggioPotenzaAttiva = 0;
-      contatorePeriodi = 0;
-    }
-    
     secondoIndice = 0;
     FULL_BUFFER = false;
   }
