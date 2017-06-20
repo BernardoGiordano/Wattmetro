@@ -1,3 +1,15 @@
+/**
+ * Laboratorio di Misure e Diagnostica Industriale, A.A. 2016/2017
+ * Modulo II: Progettazione e implementazione di un wattmetro numerico
+ * 
+ * Firmware per Arduino Due
+ * 
+ * Giordano Bernardo A13/854
+ * Loffredo Tommaso A13/910
+ * Egizio Ivan A13/916
+ * Di Spazio Fabio A13/974
+ */
+
 #include <DueTimer.h>
 
 // A0 CORRENTE
@@ -6,6 +18,7 @@
 // numero di periodi controllabile
 #define NP 50
 
+// frequenza di campionamento a 2kHz
 #define FC 2000
 
 // supponiamo l'array di appoggio con una dimensione sufficiente 
@@ -41,6 +54,8 @@ double appoggioPrecedenteCorrente = 0;
 double appoggioSuccessivoCorrente = 0;
 
 int contatorePeriodi = 0;
+
+// definisco variabili di appoggio globali che mi serviranno al momento della media su NP periodi
 double appoggioFrequenza = 0;
 double appoggioPotenzaAttiva = 0;
 double appoggioTensioneRMS = 0;
@@ -48,23 +63,40 @@ double appoggioCorrenteRMS = 0;
 double appoggioPotenzaApparente = 0;
 double appoggioFattorePotenza = 0;
 
+/**
+ * @brief Funzione per convertire un valore numero in tensione
+ * @param valore numerico da convertire
+ * @return valore di tensione tra 0 e 3.3V
+ */
 double numerico2tensione(int num) {
   return VFS*num/NMAX;
 }
 
+/**
+ * @brief Funzione per rilevare un evento di trigger
+ * @param campione precedente (x-1)
+ * @param valore successivo (x)
+ * @return booleano
+ */
 bool trigger(double precedente, double successivo) {
   return precedente*successivo < 0 && precedente <= 0;
 }
 
-// handler
+/**
+ * Handler associato al timer
+ */
 void getVI() {
+  // effettuo la lettura dei valori dagli ingressi analogici
   int corrente = analogRead(A0);
   int tensione = analogRead(A1);
-  if (primoElemento) { 
+
+  if (primoElemento) {
+    // se sto rilevando il primissimo elemento dall'analogRead, metto direttamente il valore nell'appoggio successivo
     appoggioSuccessivoTensione = tensione;
     appoggioSuccessivoCorrente = corrente;
     primoElemento = false;
   } else {
+    // ho già un valore relativo alla precedente chiamata dell'handler
     // porto i vecchi new negli old
     appoggioPrecedenteTensione = appoggioSuccessivoTensione;
     appoggioPrecedenteCorrente = appoggioSuccessivoCorrente;
@@ -74,11 +106,12 @@ void getVI() {
 
     bool eventoDiTrigger = trigger(numerico2tensione(appoggioPrecedenteTensione) - VFS/2, numerico2tensione(appoggioSuccessivoTensione) - VFS/2);
 
+    // aumento il contatore degli eventi di trigger in caso di evento rilevato
     if (eventoDiTrigger) {
       nEventiDiTrigger++;
     }
 
-    // se non si sono ancora verificati eventi di trigger non fare nulla
+    // se non si sono ancora verificati eventi di trigger non faccio nulla e ritorno
     if (nEventiDiTrigger == 0) 
       return;
 
@@ -115,10 +148,17 @@ void setup() {
   Timer3.attachInterrupt(getVI);
   Timer3.start(500);
 
+  // pulisco i buffer di tensione e corrente in fase di inizializzazione
   memset(memoria_tensione, 0, DIMENSIONE_MAX);
   memset(memoria_corrente, 0, DIMENSIONE_MAX);
 }
 
+/**
+ * @brief Calcolo del valore efficace di tensione
+ * @param vero se il periodo del segnale è memorizzato nella prima metà del buffer, falso se nella seconda metà del buffer
+ * @param numero di campioni nel periodo
+ * @return valore efficace di tensione che comprende il prodotto per il fattore 100 introdotto dal trasduttore di tensione
+ */
 double v_rms(bool isPrimaMeta, int n) {
   double tmp_rms = 0;
 
@@ -133,6 +173,12 @@ double v_rms(bool isPrimaMeta, int n) {
   return tmp_rms * 100;
 }
 
+/**
+ * @brief Calcolo del valore efficace di corrente
+ * @param vero se il periodo del segnale è memorizzato nella prima metà del buffer, falso se nella seconda metà del buffer
+ * @param numero di campioni nel periodo
+ * @return valore efficace di corrente che comprende il prodotto per il fattore 2 introdotto dal trasduttore di corrente
+ */
 double i_rms(bool isPrimaMeta, int n) {
   double tmp_rms = 0;
 
@@ -147,6 +193,12 @@ double i_rms(bool isPrimaMeta, int n) {
   return tmp_rms * 2;
 }
 
+/**
+ * @brief Calcolo della potenza attiva
+ * @param vero se il periodo del segnale è memorizzato nella prima metà del buffer, falso se nella seconda metà del buffer
+ * @param numero di campioni nel periodo
+ * @return potenza attiva del segnale 
+ */
 double potenza_attiva(bool isPrimaMeta, int n) {
 	double tmp_pot = 0;
 	
@@ -159,6 +211,9 @@ double potenza_attiva(bool isPrimaMeta, int n) {
 	return tmp_pot / n;
 }
 
+/**
+ * @brief stampa dei risultati su monitor seriale
+ */
 void stampa() {
   if (contatorePeriodi == NP) {
     Serial.print("\n\n\n\nTensione RMS: ");
@@ -174,11 +229,15 @@ void stampa() {
     Serial.print(appoggioPotenzaAttiva / NP);
     Serial.println(" W");
     Serial.print("Fattore di potenza: ");
-    Serial.println(appoggioFattorePotenza / NP);
+    Serial.print(appoggioFattorePotenza / NP);
+    Serial.print(" Gradi: ");
+    Serial.println(acos(appoggioFattorePotenza / NP)*180/PI);
     Serial.print("Frequenza: ");
-    Serial.print(appoggioFrequenza / NP);
+    Serial.print((FC / appoggioFrequenza) * NP);
     Serial.println(" Hz");
-  
+    Serial.print("Numero di punti totali: ");
+    Serial.println(appoggioFrequenza);
+    
     appoggioPotenzaAttiva = 0;
     appoggioPotenzaApparente = 0;
     appoggioFattorePotenza = 0;
@@ -189,6 +248,9 @@ void stampa() {
   }  
 }
 
+/**
+ * Ciclo della CPU. E' l'unico che ha la facoltà di settare a false le flag di HALF_BUFFER e FULL_BUFFER
+ */
 void loop() {
   if (HALF_BUFFER) {
     double veff = v_rms(true, primoIndice);
@@ -201,7 +263,7 @@ void loop() {
     appoggioPotenzaAttiva += potatt;
     appoggioPotenzaApparente += potapp;
     appoggioFattorePotenza += potatt/potapp;
-    appoggioFrequenza += FC / primoIndice;
+    appoggioFrequenza += primoIndice;
 
     contatorePeriodi++;
     stampa();
@@ -221,7 +283,7 @@ void loop() {
     appoggioPotenzaAttiva += potatt;
     appoggioPotenzaApparente += potapp;
     appoggioFattorePotenza += potatt/potapp;
-    appoggioFrequenza += FC / secondoIndice;
+    appoggioFrequenza += secondoIndice;
 
     contatorePeriodi++;
     stampa();
